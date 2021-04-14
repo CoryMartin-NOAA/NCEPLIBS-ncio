@@ -4,8 +4,14 @@
   !! @author Jeff Whitaker, Cory Martin
   type(Dataset), intent(in) :: dset
   character(len=*), intent(in) :: varname
+  integer, intent(in), optional :: nslice
+  integer, intent(in), optional :: slicedim
+  integer, intent(in), optional :: ncstart(5)
+  integer, intent(in), optional :: nccount(5)
   integer, intent(out), optional :: errcode
-  integer ncerr, nvar, n1,n2,n3,n4,n5
+  integer ncerr, nvar, n, nd, ndim, ncount
+  integer, allocatable, dimension(:) :: start, count
+  integer :: dimlens(5)
   logical return_errcode
   ! check if use the errcode
   if(present(errcode)) then
@@ -14,9 +20,37 @@
   else
      return_errcode=.false.
   endif
+  ! check if count/dims of data are avail
+  if (present(nslice)) then
+     ncount = nslice
+  else
+     ncount = 1
+  endif
   nvar = get_nvar(dset,varname)
-  if (dset%variables(nvar)%ndims /= 5) then
+  allocate(start(dset%variables(nvar)%ndims),count(dset%variables(nvar)%ndims))
+  start(:) = 1
+  count(:) = 1
+  dimlens(:) = 1
+  if (present(slicedim)) then
+     nd = slicedim
+  else
+     nd = dset%variables(nvar)%ndims
+  end if
+  ndim = 1
+  do n=1,dset%variables(nvar)%ndims
+     if (n == nd) then
+        start(n) = ncount
+        count(n) = 1
+     else
+        start(n) = 1
+        count(n) = dset%variables(nvar)%dimlens(n)
+        dimlens(ndim) = dset%variables(nvar)%dimlens(n)
+        ndim = ndim + 1
+     end if
+  end do
+  if (dset%variables(nvar)%ndims /= 5 .and. dset%variables(nvar)%ndims /= 6) then
      if (return_errcode) then
+        call nccheck(ncerr,halt=.false.)
         errcode=nf90_ebaddim
         return
      else
@@ -24,15 +58,29 @@
         stop 99
      endif
   endif
-  n1 = dset%variables(nvar)%dimlens(1)
-  n2 = dset%variables(nvar)%dimlens(2)
-  n3 = dset%variables(nvar)%dimlens(3)
-  n4 = dset%variables(nvar)%dimlens(4)
-  n5 = dset%variables(nvar)%dimlens(5)
   ! allocate/deallocate values
   if (allocated(values)) deallocate(values)
-  allocate(values(n1,n2,n3,n4,n5))
-  ncerr = nf90_get_var(dset%ncid, dset%variables(nvar)%varid, values)
+  if (present(ncstart) .and. present(nccount)) then
+     allocate(values(nccount(1),nccount(2),nccount(3),nccount(4),nccount(5)))
+     start(1)=ncstart(1); count(1)=nccount(1)
+     start(2)=ncstart(2); count(2)=nccount(2)
+     start(3)=ncstart(3); count(3)=nccount(3)
+     start(4)=ncstart(4); count(4)=nccount(4)
+     start(5)=ncstart(5); count(5)=nccount(5)
+     if (dset%variables(nvar)%ndims == 6) then
+        start(6)=1; count(6)=1
+     end if
+     ncerr = nf90_get_var(dset%ncid, dset%variables(nvar)%varid, values,&
+          start=start, count=count)
+  else
+     allocate(values(dimlens(1),dimlens(2),dimlens(3),dimlens(4),dimlens(5)))
+     if (dset%variables(nvar)%ndims == 6) then
+        ncerr = nf90_get_var(dset%ncid, dset%variables(nvar)%varid, values,&
+             start=start, count=count)
+     else
+        ncerr = nf90_get_var(dset%ncid, dset%variables(nvar)%varid, values)
+     end if
+  end if
   ! err check
   if (return_errcode) then
      call nccheck(ncerr,halt=.false.)
